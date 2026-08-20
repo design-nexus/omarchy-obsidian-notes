@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "rperaza.obsidian-notes",
+  "name": "Obsidian Notes",
+  "version": "1.0.0",
+  "author": "Roimer Peraza",
+  "description": "Search and open notes across an Obsidian vault from the bar.",
+  "license": "MIT",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Obsidian Notes",
+    "description": "Search notes across the Obsidian vault and open them in Obsidian",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "vaultPath": ""
+    },
+    "schema": [
+      {
+        "key": "vaultPath",
+        "type": "string",
+        "label": "Vault path",
+        "defaultValue": ""
+      }
+    ]
+  }
+}
