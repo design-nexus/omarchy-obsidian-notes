@@ -76,6 +76,18 @@ Panel {
     return "obsidian://open?vault=" + root.encode(root.vaultName()) + "&file=" + root.encode(file)
   }
 
+  // Vault content is untrusted input: titles, paths and snippets can contain
+  // HTML such as <img src="http://…">, and QML Text defaults to AutoText,
+  // which would let the shared shell process fetch remote resources. Every
+  // Text rendering note data therefore pins textFormat: Text.PlainText, and
+  // strings passed to kit components that own their own label (Button) are
+  // entity-escaped first because their internal label cannot be configured.
+  function escapeHtml(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+  }
+
   function whenText(epoch) {
     if (epoch === null || epoch === undefined || isNaN(Number(epoch))) return ""
     var d = new Date(Number(epoch) * 1000)
@@ -397,6 +409,7 @@ Panel {
             visible: root.saveError !== ""
             width: parent.width
             text: root.saveError
+            textFormat: Text.PlainText
             color: root.bar ? root.bar.urgent : Color.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -436,6 +449,7 @@ Panel {
           Text {
             width: parent.width
             text: root.localPath(folderModel.folder)
+            textFormat: Text.PlainText
             elide: Text.ElideMiddle
             color: root.foreground
             font.family: root.fontFamily
@@ -492,7 +506,7 @@ Panel {
               required property string fileName
               required property url fileUrl
               width: folderList.width
-              text: fileName
+              text: root.escapeHtml(fileName)
               leftAlign: true
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -556,6 +570,7 @@ Panel {
               Text {
                 width: parent.width
                 text: row.note.title || row.note.path || "…"
+                textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: root.foreground
                 font.family: root.fontFamily
@@ -565,6 +580,7 @@ Panel {
               Text {
                 width: parent.width
                 text: row.note.path || ""
+                textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: root.dim
                 font.family: root.fontFamily
@@ -575,6 +591,7 @@ Panel {
                 width: parent.width
                 visible: (row.note.snippet || "") !== ""
                 text: row.note.snippet || ""
+                textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: root.dim
                 font.family: root.fontFamily
@@ -588,6 +605,7 @@ Panel {
               anchors.rightMargin: Style.space(10)
               anchors.topMargin: Style.space(8)
               text: root.whenText(row.note.modified)
+              textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -600,6 +618,7 @@ Panel {
           width: parent.width
           visible: !root.choosingVault && !root.composing && root.empty
           text: root.query === "" ? "The vault is empty or cannot be read" : "No results for “" + root.query + "”"
+          textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
@@ -611,6 +630,7 @@ Panel {
           width: parent.width
           visible: !root.choosingVault && !root.composing
           text: root.footerText
+          textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
