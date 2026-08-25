@@ -115,6 +115,7 @@ Panel {
     root.lastError = ""
     searchProcess.command = [root.searchCommand, root.vaultPath, filterField.text]
     searchProcess.running = true
+    searchDeadline.restart()
   }
 
   function persistVaultPath(path) {
@@ -139,6 +140,7 @@ Panel {
   }
 
   function parseResults(raw) {
+    searchDeadline.stop()
     var text = String(raw || "").trim()
     root.searching = false
     if (text === "") {
@@ -226,10 +228,38 @@ Panel {
     }
 
     onExited: function(exitCode) {
+      searchDeadline.stop()
       root.searching = false
-      if (exitCode !== 0) {
+      // Timeout-killed helpers exit 124 (timeout) or 143; the deadline timer
+      // already set a user-visible message, so do not overwrite it.
+      if (exitCode !== 0 && root.lastError === "" && !searchDeadline.running) {
+        // Keep the timeout message if the deadline fired; otherwise generic.
+        if (exitCode === 124 || exitCode === 143) {
+          if (root.lastError === "") root.lastError = "Search timed out"
+        } else {
+          console.warn(root.moduleName + ": search command exited", exitCode)
+          root.lastError = "Search failed (error " + exitCode + ")"
+        }
+      } else if (exitCode !== 0 && root.lastError === "") {
         console.warn(root.moduleName + ": search command exited", exitCode)
         root.lastError = "Search failed (error " + exitCode + ")"
+      }
+    }
+  }
+
+  // Whole-operation deadline for the helper: even with bounded helper I/O,
+  // a pathological vault could keep search.sh alive. The helper itself has
+  // an internal SECONDS budget and bounded find; this timer is the QML-side
+  // hard kill so the shared shell process cannot be held indefinitely.
+  Timer {
+    id: searchDeadline
+    interval: 4500
+    repeat: false
+    onTriggered: {
+      if (searchProcess.running) {
+        searchProcess.running = false
+        root.searching = false
+        if (root.lastError === "") root.lastError = "Search timed out"
       }
     }
   }
