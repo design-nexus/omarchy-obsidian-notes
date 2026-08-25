@@ -19,8 +19,15 @@ Panel {
   moduleName: "rperaza.obsidian-notes"
   ipcTarget: "rperaza.obsidian-notes"
 
-  readonly property color foreground: bar ? bar.barForeground : Color.foreground
-  readonly property color dim: Qt.darker(foreground, 1.4)
+  // Popup content must stay readable when the bar is double-clicked to
+  // transparent. bar.barForeground is intentionally animated to contrast the
+  // wallpaper behind a transparent bar (via omarchy-bar-text-color), so it
+  // can become near-black on light wallpapers while the popup card stays
+  // Color.popups.background (dark). Using barForeground inside the popup
+  // therefore makes dark-on-dark unreadable — see screenshot. Use the
+  // popup surface palette instead, which is always contrasting its card.
+  readonly property color foreground: Color.popups.text
+  readonly property color dim: Util.alpha(Color.popups.text, 0.62)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string configuredVaultPath: String(root.setting("vaultPath", "")).trim()
   readonly property string vaultPath: configuredVaultPath.indexOf("~/") === 0
