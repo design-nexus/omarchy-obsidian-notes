@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "rperaza.obsidian-notes",
   "name": "Obsidian Notes",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Roimer Peraza",
   "description": "Search and open notes across an Obsidian vault from the bar.",
   "license": "MIT",
