@@ -60,6 +60,8 @@ Panel {
 
   readonly property int maxRows: 8
   readonly property real rowHeight: Style.space(56)
+  // Square actions match the search field, not the smaller control-height token.
+  readonly property real actionSize: filterField.implicitHeight
   readonly property string query: filterField.text.trim()
   readonly property bool empty: !searching && results.length === 0 && lastError === ""
   readonly property bool editorDirty: titleField.text !== loadedTitle || noteEditor.text !== loadedBody
@@ -75,6 +77,19 @@ Panel {
   visible: true
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
+
+  component ActionButton: Button {
+    iconSize: Math.max(Style.font.icon, Math.round(root.actionSize * 0.55))
+    horizontalPadding: 0
+    verticalPadding: 0
+    width: root.actionSize
+    height: root.actionSize
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    bordered: true
+    focusable: true
+    opacity: enabled ? 1 : 0.4
+  }
 
   function vaultName() {
     var parts = String(root.vaultPath).split("/").filter(function(p) { return p !== "" })
@@ -588,7 +603,7 @@ Panel {
 
           TextField {
             id: filterField
-            width: parent.width - addButton.width - editButton.width - deleteButton.width - vaultButton.width - parent.spacing * 4
+            width: parent.width - root.actionSize * 4 - parent.spacing * 4
             placeholderText: root.vaultPath === "" ? "Select a vault…" : "Search the vault…"
             foreground: root.foreground
             enabled: root.vaultPath !== ""
@@ -614,54 +629,36 @@ Panel {
             Keys.onPressed: function(event) { root.handleListShortcut(event) }
           }
 
-          Button {
+          ActionButton {
             id: addButton
-            text: "+"
+            iconText: "󰐕"
             tooltipText: "Create a note  Ctrl+N"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.title
-            bordered: true
-            focusable: true
             onClicked: root.startComposing()
           }
 
-          Button {
+          ActionButton {
             id: editButton
-            text: "Edit"
+            iconText: "󰏫"
             tooltipText: "Edit the selected note  Ctrl+E"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.bodySmall
-            bordered: true
-            focusable: true
             enabled: root.selectedPath() !== ""
             onClicked: root.startEditing()
           }
 
-          Button {
+          ActionButton {
             id: deleteButton
-            text: root.deleteArmedPath !== "" && root.deleteArmedPath === root.selectedPath() ? "Confirm" : "Del"
-            tooltipText: "Move the selected note to trash"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.bodySmall
-            bordered: true
-            focusable: true
+            iconText: root.deleteArmedPath !== "" && root.deleteArmedPath === root.selectedPath() ? "󰄬" : "󰆴"
+            tooltipText: root.deleteArmedPath === root.selectedPath() && root.deleteArmedPath !== ""
+              ? "Confirm delete"
+              : "Move the selected note to trash"
+            selected: root.deleteArmedPath !== "" && root.deleteArmedPath === root.selectedPath()
             enabled: root.selectedPath() !== "" && !root.deleting
             onClicked: root.requestDelete()
           }
 
-          Button {
+          ActionButton {
             id: vaultButton
             iconText: "󰒓"
             tooltipText: "Change vault"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            iconSize: Style.font.icon
-            horizontalPadding: Style.space(7)
-            bordered: true
-            focusable: true
             onClicked: {
               folderModel.folder = "file://" + (root.vaultPath || Quickshell.env("HOME") || "/")
               root.choosingVault = true
@@ -736,46 +733,33 @@ Panel {
           Row {
             spacing: Style.spacing.sm
 
-            Button {
-              text: root.saving ? "Saving…" : "Save"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              bordered: true
-              focusable: true
+            ActionButton {
+              iconText: "󰆓"
+              iconSpinning: root.saving
+              tooltipText: root.saving ? "Saving…" : "Save  Ctrl+Enter"
               enabled: !root.saving && !root.loadingNote
               onClicked: root.saveNote()
             }
 
-            Button {
-              text: "Cancel"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              focusable: true
+            ActionButton {
+              iconText: "󰅖"
+              tooltipText: "Cancel"
               enabled: !root.saving
               onClicked: root.cancelComposing()
             }
 
-            Button {
+            ActionButton {
               visible: root.editingPath !== ""
-              text: "Open"
+              iconText: "󰏌"
               tooltipText: "Open in Obsidian"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              focusable: true
               onClicked: root.openPath(root.editingPath)
             }
 
-            Button {
+            ActionButton {
               visible: root.editingPath !== ""
-              text: root.deleteArmedPath === root.editingPath ? "Confirm delete" : "Delete"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              bordered: true
-              focusable: true
+              iconText: root.deleteArmedPath === root.editingPath ? "󰄬" : "󰆴"
+              tooltipText: root.deleteArmedPath === root.editingPath ? "Confirm delete" : "Move this note to trash"
+              selected: root.deleteArmedPath === root.editingPath && root.editingPath !== ""
               enabled: !root.deleting && !root.loadingNote
               onClicked: root.requestDelete()
             }
@@ -801,34 +785,26 @@ Panel {
             width: parent.width
             spacing: Style.spacing.sm
 
-            Button {
-              text: "Up"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              bordered: true
+            ActionButton {
+              iconText: "󰁝"
+              tooltipText: "Up"
               enabled: String(folderModel.parentFolder) !== ""
               onClicked: folderModel.folder = folderModel.parentFolder
             }
 
-            Button {
-              text: "Use this folder"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
-              bordered: true
+            ActionButton {
+              iconText: "󰄬"
+              tooltipText: "Use this folder"
               onClicked: {
                 root.persistVaultPath(root.localPath(folderModel.folder))
                 root.choosingVault = false
               }
             }
 
-            Button {
+            ActionButton {
               visible: root.vaultPath !== ""
-              text: "Cancel"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
+              iconText: "󰅖"
+              tooltipText: "Cancel"
               onClicked: root.choosingVault = false
             }
           }

@@ -23,7 +23,7 @@ Search, open, edit, and capture Obsidian notes without leaving the Omarchy bar.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/design-nexus/omarchy-obsidian --enable
+omarchy plugin add https://github.com/design-nexus/omarchy-obsidian-notes --enable
 ```
 
 The `Notes` widget is placed in the center section by default. Move it anywhere
