@@ -79,11 +79,12 @@ Panel {
   implicitHeight: button.implicitHeight
 
   component ActionButton: Button {
-    iconSize: Math.max(Style.font.icon, Math.round(root.actionSize * 0.55))
+    property real side: root.actionSize
+    iconSize: Math.max(Style.font.icon, Math.round(side * 0.55))
     horizontalPadding: 0
     verticalPadding: 0
-    width: root.actionSize
-    height: root.actionSize
+    width: side
+    height: side
     foreground: root.foreground
     fontFamily: root.fontFamily
     bordered: true
@@ -608,7 +609,7 @@ Panel {
 
           TextField {
             id: filterField
-            width: parent.width - root.actionSize * 4 - parent.spacing * 4
+            width: parent.width - root.actionSize * 2 - parent.spacing * 2
             placeholderText: root.vaultPath === "" ? "Select a vault…" : "Search the vault…"
             foreground: root.foreground
             enabled: root.vaultPath !== ""
@@ -639,25 +640,6 @@ Panel {
             iconText: "󰐕"
             tooltipText: "Create a note  Ctrl+N"
             onClicked: root.startComposing()
-          }
-
-          ActionButton {
-            id: editButton
-            iconText: "󰏫"
-            tooltipText: "Edit the selected note  Ctrl+E"
-            enabled: root.selectedPath() !== ""
-            onClicked: root.startEditing()
-          }
-
-          ActionButton {
-            id: deleteButton
-            iconText: root.deleteArmedPath !== "" && root.deleteArmedPath === root.selectedPath() ? "󰄬" : "󰆴"
-            tooltipText: root.deleteArmedPath === root.selectedPath() && root.deleteArmedPath !== ""
-              ? "Confirm delete"
-              : "Move the selected note to trash"
-            selected: root.deleteArmedPath !== "" && root.deleteArmedPath === root.selectedPath()
-            enabled: root.selectedPath() !== "" && !root.deleting
-            onClicked: root.requestDelete()
           }
 
           ActionButton {
@@ -863,6 +845,23 @@ Panel {
             id: row
             required property int index
             readonly property var note: root.results[index] || ({})
+            readonly property real rowPad: Style.space(6)
+            readonly property real rowActionSide: Math.max(Style.space(18), height - noteDate.y - noteDate.height - rowPad * 2)
+            property bool actionsOpen: false
+
+            function pointerOverRow() {
+              return rowPointer.hovered || rowEdit.hot || rowDelete.hot
+            }
+
+            function noteRowHover() {
+              if (pointerOverRow()) {
+                hideActions.stop()
+                actionsOpen = true
+                root.selectedIndex = index
+              } else {
+                hideActions.restart()
+              }
+            }
             width: resultList.width
             height: root.rowHeight
             radius: Style.space(4)
@@ -870,22 +869,35 @@ Panel {
               ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
               : "transparent"
 
+            HoverHandler {
+              id: rowPointer
+              onHoveredChanged: row.noteRowHover()
+            }
+
+            Timer {
+              id: hideActions
+              interval: 80
+              onTriggered: {
+                if (row.pointerOverRow()) return
+                row.actionsOpen = false
+                if (root.deleteArmedPath === String(row.note.path || ""))
+                  root.deleteArmedPath = ""
+              }
+            }
+
             MouseArea {
               anchors.fill: parent
-              hoverEnabled: true
-              onEntered: root.selectedIndex = index
-              onPositionChanged: root.selectedIndex = index
               onClicked: {
-                root.selectedIndex = index
+                root.selectedIndex = row.index
                 root.openNote()
               }
             }
 
             Column {
               anchors.left: parent.left
-              anchors.right: parent.right
+              anchors.right: row.actionsOpen ? rowActions.left : noteDate.left
               anchors.leftMargin: Style.space(10)
-              anchors.rightMargin: Style.space(10)
+              anchors.rightMargin: row.rowPad
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(2)
 
@@ -921,11 +933,50 @@ Panel {
               }
             }
 
+            Row {
+              id: rowActions
+              visible: row.actionsOpen
+              anchors.top: noteDate.bottom
+              anchors.right: noteDate.right
+              anchors.topMargin: row.rowPad
+              spacing: row.rowPad
+              z: 2
+
+              ActionButton {
+                id: rowEdit
+                side: row.rowActionSide
+                iconText: "󰏫"
+                tooltipText: "Edit"
+                onHovered: row.noteRowHover()
+                onClicked: {
+                  root.selectedIndex = row.index
+                  root.startEditing()
+                }
+              }
+
+              ActionButton {
+                id: rowDelete
+                side: row.rowActionSide
+                iconText: root.deleteArmedPath === String(row.note.path || "") ? "󰄬" : "󰆴"
+                tooltipText: root.deleteArmedPath === String(row.note.path || "")
+                  ? "Confirm delete"
+                  : "Move to trash"
+                selected: root.deleteArmedPath === String(row.note.path || "")
+                enabled: !root.deleting
+                onHovered: row.noteRowHover()
+                onClicked: {
+                  root.selectedIndex = row.index
+                  root.requestDelete()
+                }
+              }
+            }
+
             Text {
+              id: noteDate
               anchors.right: parent.right
               anchors.top: parent.top
-              anchors.rightMargin: Style.space(10)
-              anchors.topMargin: Style.space(8)
+              anchors.rightMargin: row.rowPad
+              anchors.topMargin: row.rowPad
               text: root.whenText(row.note.modified)
               textFormat: Text.PlainText
               color: root.dim
