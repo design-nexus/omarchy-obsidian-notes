@@ -1,25 +1,55 @@
 #!/usr/bin/env bash
-# Create a timestamped Markdown note under <vault>/omarchy-notes.
+# Create a Markdown note under <vault>/Notes.
+#   create-note.sh <vault> <title>
+# The body is read from stdin. An empty title uses a timestamp filename and
+# no heading. A title becomes the slug and the first heading.
 set -euo pipefail
 
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$here/note-lib.sh"
+
 vault="${1:-}"
-content="${2:-}"
+title="${2:-}"
 
-if [[ -z $vault || ! -d $vault ]]; then
-  printf 'Vault directory does not exist\n' >&2
-  exit 2
-fi
+[[ -n $vault && -d $vault ]] || note_fail "Vault directory does not exist"
+[[ $title != *$'\n'* && $title != *$'\r'* ]] || note_fail "Title cannot contain a newline"
+title=$(note_trim "$title")
+(( ${#title} <= 200 )) || note_fail "Title is too long"
 
-notes_dir="$vault/omarchy-notes"
+note_read_stdin
+
+notes_dir="$vault/Notes"
 mkdir -p -- "$notes_dir"
 
-stamp="$(date '+%Y-%m-%d-%H%M%S')"
-note="$notes_dir/$stamp.md"
-counter=1
-while [[ -e $note ]]; do
-  note="$notes_dir/$stamp-$counter.md"
+slug=""
+if [[ -n $title ]]; then
+  slug=$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+  slug=${slug:0:80}
+  slug=${slug%-}
+fi
+if [[ -z $slug ]]; then
+  slug=$(date '+%Y-%m-%d-%H%M%S')
+fi
+
+note="$notes_dir/$slug.md"
+counter=2
+while [[ -e $note || -L $note ]]; do
+  note="$notes_dir/$slug-$counter.md"
   ((counter++))
 done
 
-( set -o noclobber; printf '%s\n' "$content" > "$note" )
-printf 'omarchy-notes/%s\n' "${note##*/}"
+tmp=$(mktemp "$notes_dir/.creating.XXXXXX")
+cleanup() { rm -f -- "$tmp"; }
+trap cleanup EXIT
+
+{
+  if [[ -n $title ]]; then
+    printf '# %s\n\n' "$title"
+  fi
+  printf '%s' "$NOTE_STDIN"
+} > "$tmp"
+
+mv -n -- "$tmp" "$note" || note_fail "Could not create the note"
+trap - EXIT
+printf 'OK\tNotes/%s\n' "${note##*/}"

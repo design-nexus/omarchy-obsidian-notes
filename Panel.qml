@@ -8,24 +8,22 @@ import qs.Ui
 
 // Bar search over an Obsidian vault.
 //
-// The bar entry is a text label. Left click (or keyboard summon) opens a
-// panel with a search field and a ranked note list; typing searches the vault
-// by title, path and full text. Enter or a click opens the note in Obsidian
-// through its obsidian:// URI. Data comes from search.sh, which only reads
-// the filesystem, so Obsidian never has to be running.
+// The bar entry is a text label. Left click opens a panel with a search
+// field and a ranked note list. Enter opens the note in Obsidian. New notes
+// are written under <vault>/Notes. Existing notes can be edited here or
+// moved into <vault>/.trash after a second confirmation.
 Panel {
   id: root
 
-  moduleName: "rperaza.obsidian-notes"
-  ipcTarget: "rperaza.obsidian-notes"
+  moduleName: "design-nexus.obsidian-notes"
+  ipcTarget: "design-nexus.obsidian-notes"
 
   // Popup content must stay readable when the bar is double-clicked to
   // transparent. bar.barForeground is intentionally animated to contrast the
   // wallpaper behind a transparent bar (via omarchy-bar-text-color), so it
   // can become near-black on light wallpapers while the popup card stays
   // Color.popups.background (dark). Using barForeground inside the popup
-  // therefore makes dark-on-dark unreadable — see screenshot. Use the
-  // popup surface palette instead, which is always contrasting its card.
+  // therefore makes dark-on-dark unreadable. Use the popup surface palette.
   readonly property color foreground: Color.popups.text
   readonly property color dim: Util.alpha(Color.popups.text, 0.62)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -33,10 +31,13 @@ Panel {
   readonly property string vaultPath: configuredVaultPath.indexOf("~/") === 0
     ? (Quickshell.env("HOME") || "") + configuredVaultPath.slice(1)
     : configuredVaultPath
-  readonly property string searchCommand: (Quickshell.env("HOME") || "")
-    + "/.config/omarchy/plugins/rperaza.obsidian-notes/search.sh"
-  readonly property string createCommand: (Quickshell.env("HOME") || "")
-    + "/.config/omarchy/plugins/rperaza.obsidian-notes/create-note.sh"
+  readonly property string pluginDir: (Quickshell.env("HOME") || "")
+    + "/.config/omarchy/plugins/design-nexus.obsidian-notes"
+  readonly property string searchCommand: pluginDir + "/search.sh"
+  readonly property string createCommand: pluginDir + "/create-note.sh"
+  readonly property string readCommand: pluginDir + "/read-note.sh"
+  readonly property string writeCommand: pluginDir + "/write-note.sh"
+  readonly property string deleteCommand: pluginDir + "/delete-note.sh"
 
   property var results: []
   property int selectedIndex: -1
@@ -44,27 +45,36 @@ Panel {
   property bool choosingVault: false
   property bool composing: false
   property bool saving: false
+  property bool deleting: false
+  property bool loadingNote: false
+  property string editingPath: ""
+  property string loadedTitle: ""
+  property string loadedBody: ""
+  property bool discardArmed: false
+  property string deleteArmedPath: ""
+  property string pendingBody: ""
+  property string saveOutput: ""
   property string saveError: ""
   property string lastError: ""
+  property string notice: ""
 
   readonly property int maxRows: 8
   readonly property real rowHeight: Style.space(56)
   readonly property string query: filterField.text.trim()
   readonly property bool empty: !searching && results.length === 0 && lastError === ""
+  readonly property bool editorDirty: titleField.text !== loadedTitle || noteEditor.text !== loadedBody
 
   readonly property string footerText: {
+    if (deleteArmedPath !== "") return "Delete this note? Press Delete again   ·   Esc cancel"
     if (searching) return "Searching…"
     if (lastError) return lastError
-    if (results.length === 0) return "↑↓ navigate   ·   Enter open   ·   Esc close"
-    return results.length + (results.length === 1 ? " result" : " results")
-      + "   ·   ↑↓ navigate   ·   Enter open   ·   Esc close"
+    if (notice) return notice
+    return "↑↓  Enter open  ^N new  ^E edit  ^L link  Del delete"
   }
 
   visible: true
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
-
-  // ---- URI / formatting helpers -------------------------------------------
 
   function vaultName() {
     var parts = String(root.vaultPath).split("/").filter(function(p) { return p !== "" })
@@ -83,12 +93,13 @@ Panel {
     return "obsidian://open?vault=" + root.encode(root.vaultName()) + "&file=" + root.encode(file)
   }
 
-  // Vault content is untrusted input: titles, paths and snippets can contain
-  // HTML such as <img src="http://…">, and QML Text defaults to AutoText,
-  // which would let the shared shell process fetch remote resources. Every
-  // Text rendering note data therefore pins textFormat: Text.PlainText, and
-  // strings passed to kit components that own their own label (Button) are
-  // entity-escaped first because their internal label cannot be configured.
+  function wikiLink(relPath) {
+    return "[[" + String(relPath || "").replace(/\.md$/, "") + "]]"
+  }
+
+  // Vault content is untrusted input. QML Text defaults to AutoText, which
+  // would let the shared shell process fetch remote resources. Note strings
+  // are plain text, and Button labels are entity-escaped.
   function escapeHtml(s) {
     return String(s === null || s === undefined ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -107,7 +118,11 @@ Panel {
     return pad(d.getDate()) + " " + months[d.getMonth()]
   }
 
-  // ---- actions -------------------------------------------------------------
+  function selectedPath() {
+    if (root.selectedIndex < 0 || root.selectedIndex >= root.results.length) return ""
+    var note = root.results[root.selectedIndex]
+    return note && note.path ? String(note.path) : ""
+  }
 
   function runSearch() {
     if (searchProcess.running) return
@@ -169,52 +184,220 @@ Panel {
 
   function move(delta) {
     var n = root.results.length
+    root.deleteArmedPath = ""
     if (n <= 0) return
     root.selectedIndex = Math.max(0, Math.min(n - 1, root.selectedIndex + delta))
     resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
 
-  function openNote() {
-    if (root.selectedIndex < 0 || root.selectedIndex >= root.results.length) return
-    var note = root.results[root.selectedIndex]
-    if (!note || !note.path) return
+  function openPath(relPath) {
+    if (!relPath) return
     root.close()
+    var uri = root.obsidianUri(relPath)
     Qt.callLater(function() {
-      Quickshell.execDetached(["xdg-open", root.obsidianUri(note.path)])
+      Quickshell.execDetached(["xdg-open", uri])
     })
   }
 
+  function openNote() {
+    root.openPath(root.selectedPath())
+  }
+
+  function copyLink() {
+    var path = root.composing ? root.editingPath : root.selectedPath()
+    if (path === "") return
+    var link = root.wikiLink(path)
+    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(link) + " | wl-copy"])
+    root.notice = "Link copied"
+    noticeTimer.restart()
+  }
+
+  function handleListShortcut(event) {
+    if (!(event.modifiers & Qt.ControlModifier)) return false
+    if (event.key === Qt.Key_N) {
+      root.startComposing()
+      event.accepted = true
+      return true
+    }
+    if (event.key === Qt.Key_E) {
+      root.startEditing()
+      event.accepted = true
+      return true
+    }
+    if (event.key === Qt.Key_L) {
+      root.copyLink()
+      event.accepted = true
+      return true
+    }
+    return false
+  }
+
   function startComposing() {
+    if (root.vaultPath === "") return
     root.choosingVault = false
     root.composing = true
+    root.editingPath = ""
+    root.loadingNote = false
     root.saveError = ""
+    root.discardArmed = false
+    root.deleteArmedPath = ""
+    root.loadedTitle = ""
+    root.loadedBody = ""
+    titleField.text = ""
     noteEditor.text = ""
-    Qt.callLater(function() { noteEditor.forceActiveFocus() })
+    Qt.callLater(function() { titleField.forceActiveFocus() })
+  }
+
+  function startEditing() {
+    var path = root.selectedPath()
+    if (path === "" || root.vaultPath === "") return
+    root.choosingVault = false
+    root.composing = true
+    root.editingPath = path
+    root.loadingNote = true
+    root.saving = false
+    root.saveError = ""
+    root.discardArmed = false
+    root.deleteArmedPath = ""
+    root.loadedTitle = ""
+    root.loadedBody = ""
+    titleField.text = ""
+    noteEditor.text = ""
+    readProcess.command = [root.readCommand, root.vaultPath, path]
+    readProcess.running = true
+  }
+
+  function applyLoadedNote(raw) {
+    root.loadingNote = false
+    var text = String(raw || "").trim()
+    if (text.indexOf("ERR\t") === 0) {
+      root.composing = false
+      root.editingPath = ""
+      root.lastError = text.slice(4)
+      return
+    }
+    try {
+      var parsed = JSON.parse(text)
+      titleField.text = String(parsed.title || "")
+      noteEditor.text = String(parsed.body || "")
+      root.loadedTitle = titleField.text
+      root.loadedBody = noteEditor.text
+      root.discardArmed = false
+      Qt.callLater(function() { titleField.forceActiveFocus() })
+    } catch (e) {
+      console.warn(root.moduleName + ": invalid note", e)
+      root.composing = false
+      root.editingPath = ""
+      root.lastError = "Could not read the note"
+    }
   }
 
   function cancelComposing() {
     root.composing = false
+    root.editingPath = ""
+    root.loadingNote = false
     root.saveError = ""
+    root.discardArmed = false
+    root.deleteArmedPath = ""
+    titleField.text = ""
     noteEditor.text = ""
     Qt.callLater(function() { filterField.forceActiveFocus() })
   }
 
+  function requestCancel() {
+    if (root.deleteArmedPath !== "") {
+      root.deleteArmedPath = ""
+      return
+    }
+    if (root.editorDirty && !root.discardArmed) {
+      root.discardArmed = true
+      root.saveError = "Unsaved changes. Press Escape again to discard"
+      return
+    }
+    root.cancelComposing()
+  }
+
   function saveNote() {
-    if (root.saving) return
-    if (noteEditor.text.trim() === "") {
-      root.saveError = "Write something before saving"
+    if (root.saving || root.loadingNote) return
+    var title = titleField.text.trim()
+    var body = noteEditor.text
+    if (root.editingPath === "" && title === "" && body.trim() === "") {
+      root.saveError = "Add a title or write something before saving"
+      return
+    }
+    if (root.editingPath !== "" && title === "") {
+      root.saveError = "Add a title before saving"
       return
     }
     root.saving = true
     root.saveError = ""
-    createProcess.command = [root.createCommand, root.vaultPath, noteEditor.text]
-    createProcess.running = true
+    root.discardArmed = false
+    root.pendingBody = body
+    root.saveOutput = ""
+    var proc = root.editingPath === "" ? createProcess : writeProcess
+    proc.stdinEnabled = true
+    proc.command = root.editingPath === ""
+      ? [root.createCommand, root.vaultPath, title]
+      : [root.writeCommand, root.vaultPath, root.editingPath, title]
+    proc.running = true
+  }
+
+  function finishSave(exitCode) {
+    root.saving = false
+    var text = String(root.saveOutput || "").trim()
+    if (exitCode === 0 && text.indexOf("OK\t") === 0) {
+      root.composing = false
+      root.editingPath = ""
+      root.loadedTitle = ""
+      root.loadedBody = ""
+      titleField.text = ""
+      noteEditor.text = ""
+      filterField.text = ""
+      root.runSearch()
+      Qt.callLater(function() { filterField.forceActiveFocus() })
+      return
+    }
+    root.saveError = text.indexOf("ERR\t") === 0
+      ? text.slice(4)
+      : "Could not save the note (error " + exitCode + ")"
+  }
+
+  function requestDelete() {
+    if (root.deleting || root.saving) return
+    var path = root.composing ? root.editingPath : root.selectedPath()
+    if (path === "") return
+    if (root.deleteArmedPath !== path) {
+      root.deleteArmedPath = path
+      root.discardArmed = false
+      return
+    }
+    root.deleting = true
+    root.deleteArmedPath = ""
+    root.saveError = ""
+    deleteProcess.command = [root.deleteCommand, root.vaultPath, path]
+    deleteProcess.running = true
+  }
+
+  function editorShortcut(event) {
+    if ((event.modifiers & Qt.ControlModifier) && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+      root.saveNote()
+      event.accepted = true
+      return
+    }
+    if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_L) {
+      root.copyLink()
+      event.accepted = true
+    }
   }
 
   onOpenedChanged: if (opened) {
     filterField.text = ""
     root.composing = false
+    root.editingPath = ""
     root.saveError = ""
+    root.notice = ""
+    root.deleteArmedPath = ""
+    root.discardArmed = false
     root.choosingVault = root.vaultPath === ""
     if (!root.choosingVault) root.runSearch()
     Qt.callLater(function() {
@@ -237,27 +420,13 @@ Panel {
     onExited: function(exitCode) {
       searchDeadline.stop()
       root.searching = false
-      // Timeout-killed helpers exit 124 (timeout) or 143; the deadline timer
-      // already set a user-visible message, so do not overwrite it.
-      if (exitCode !== 0 && root.lastError === "" && !searchDeadline.running) {
-        // Keep the timeout message if the deadline fired; otherwise generic.
-        if (exitCode === 124 || exitCode === 143) {
-          if (root.lastError === "") root.lastError = "Search timed out"
-        } else {
-          console.warn(root.moduleName + ": search command exited", exitCode)
-          root.lastError = "Search failed (error " + exitCode + ")"
-        }
-      } else if (exitCode !== 0 && root.lastError === "") {
+      if (exitCode !== 0 && root.lastError === "") {
         console.warn(root.moduleName + ": search command exited", exitCode)
-        root.lastError = "Search failed (error " + exitCode + ")"
+        root.lastError = (exitCode === 124 || exitCode === 143) ? "Search timed out" : "Search failed (error " + exitCode + ")"
       }
     }
   }
 
-  // Whole-operation deadline for the helper: even with bounded helper I/O,
-  // a pathological vault could keep search.sh alive. The helper itself has
-  // an internal SECONDS budget and bounded find; this timer is the QML-side
-  // hard kill so the shared shell process cannot be held indefinitely.
   Timer {
     id: searchDeadline
     interval: 4500
@@ -272,27 +441,81 @@ Panel {
   }
 
   Process {
+    id: readProcess
+    command: []
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (root.loadingNote) root.applyLoadedNote(text)
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0 && root.loadingNote) {
+        root.loadingNote = false
+        root.composing = false
+        root.editingPath = ""
+        if (root.lastError === "") root.lastError = "Could not read the note (error " + exitCode + ")"
+      }
+    }
+  }
+
+  Process {
     id: createProcess
     command: []
     running: false
-
+    stdinEnabled: true
     stdout: StdioCollector {
-      id: createOutput
+      waitForEnd: true
+      onStreamFinished: root.saveOutput = text
+    }
+    onStarted: {
+      write(root.pendingBody)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) { root.finishSave(exitCode) }
+  }
+
+  Process {
+    id: writeProcess
+    command: []
+    running: false
+    stdinEnabled: true
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.saveOutput = text
+    }
+    onStarted: {
+      write(root.pendingBody)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) { root.finishSave(exitCode) }
+  }
+
+  Process {
+    id: deleteProcess
+    command: []
+    running: false
+    stdout: StdioCollector {
+      id: deleteOutput
       waitForEnd: true
     }
-
     onExited: function(exitCode) {
-      root.saving = false
-      if (exitCode !== 0) {
-        root.saveError = "Could not save the note (error " + exitCode + ")"
+      root.deleting = false
+      var text = String(deleteOutput.text || "").trim()
+      if (exitCode !== 0 || text.indexOf("OK\t") !== 0) {
+        root.lastError = text.indexOf("ERR\t") === 0 ? text.slice(4) : "Could not delete the note"
+        root.saveError = root.composing ? root.lastError : ""
         return
       }
-      root.composing = false
-      noteEditor.text = ""
-      filterField.text = ""
+      if (root.composing) root.cancelComposing()
       root.runSearch()
-      Qt.callLater(function() { filterField.forceActiveFocus() })
     }
+  }
+
+  Timer {
+    id: noticeTimer
+    interval: 2000
+    repeat: false
+    onTriggered: root.notice = ""
   }
 
   FolderListModel {
@@ -303,8 +526,6 @@ Panel {
     showDirsFirst: true
     showDotAndDotDot: false
   }
-
-  // ---- bar entry -----------------------------------------------------------
 
   WidgetButton {
     id: button
@@ -325,27 +546,30 @@ Panel {
     }
   }
 
-  // ---- search panel ---------------------------------------------------------
-
   KeyboardPanel {
     id: panel
     anchorItem: button
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: root.composing ? noteEditor : filterField
+    focusTarget: root.composing ? titleField : filterField
     contentWidth: panel.fittedContentWidth(Style.space(460))
     contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(600))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: filterField.activeFocus || noteEditor.activeFocus
+      blocked: filterField.activeFocus || titleField.activeFocus || noteEditor.activeFocus
 
       onMoveRequested: function(dx, dy) { if (dy !== 0) root.move(dy) }
       onActivateRequested: root.openNote()
       onReturnRequested: root.openNote()
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.composing) root.requestCancel()
+        else if (root.deleteArmedPath !== "") root.deleteArmedPath = ""
+        else root.close()
+      }
+      onDeleteRequested: root.requestDelete()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         filterField.insert(filterField.cursorPosition, t)
@@ -364,31 +588,68 @@ Panel {
 
           TextField {
             id: filterField
-            width: parent.width - addButton.width - vaultButton.width - parent.spacing * 2
+            width: parent.width - addButton.width - editButton.width - deleteButton.width - vaultButton.width - parent.spacing * 4
             placeholderText: root.vaultPath === "" ? "Select a vault…" : "Search the vault…"
             foreground: root.foreground
             enabled: root.vaultPath !== ""
 
-            onTextChanged: filterTimer.restart()
+            onTextChanged: {
+              root.deleteArmedPath = ""
+              filterTimer.restart()
+            }
             onAccepted: root.openNote()
             Keys.onUpPressed: root.move(-1)
             Keys.onDownPressed: root.move(1)
             Keys.onEscapePressed: {
-              if (filterField.text !== "") filterField.text = ""
+              if (root.deleteArmedPath !== "") root.deleteArmedPath = ""
+              else if (filterField.text !== "") filterField.text = ""
               else root.close()
             }
+            Keys.onDeletePressed: function(event) {
+              if (filterField.text === "") {
+                root.requestDelete()
+                event.accepted = true
+              }
+            }
+            Keys.onPressed: function(event) { root.handleListShortcut(event) }
           }
 
           Button {
             id: addButton
             text: "+"
-            tooltipText: "Create a quick note"
+            tooltipText: "Create a note  Ctrl+N"
             foreground: root.foreground
             fontFamily: root.fontFamily
             fontSize: Style.font.title
             bordered: true
             focusable: true
             onClicked: root.startComposing()
+          }
+
+          Button {
+            id: editButton
+            text: "Edit"
+            tooltipText: "Edit the selected note  Ctrl+E"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            bordered: true
+            focusable: true
+            enabled: root.selectedPath() !== ""
+            onClicked: root.startEditing()
+          }
+
+          Button {
+            id: deleteButton
+            text: root.deleteArmedPath !== "" && root.deleteArmedPath === root.selectedPath() ? "Confirm" : "Del"
+            tooltipText: "Move the selected note to trash"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            bordered: true
+            focusable: true
+            enabled: root.selectedPath() !== "" && !root.deleting
+            onClicked: root.requestDelete()
           }
 
           Button {
@@ -404,6 +665,7 @@ Panel {
             onClicked: {
               folderModel.folder = "file://" + (root.vaultPath || Quickshell.env("HOME") || "/")
               root.choosingVault = true
+              root.deleteArmedPath = ""
             }
           }
         }
@@ -414,17 +676,32 @@ Panel {
           spacing: Style.spacing.sm
 
           Text {
-            text: "New note · omarchy-notes"
+            width: parent.width
+            text: root.editingPath === "" ? "New note · Notes" : root.editingPath
+            textFormat: Text.PlainText
+            elide: Text.ElideMiddle
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
+          }
+
+          TextField {
+            id: titleField
+            width: parent.width
+            placeholderText: "Title"
+            foreground: root.foreground
+            enabled: !root.saving && !root.loadingNote
+            maximumLength: 200
+            onTextChanged: root.discardArmed = false
+            Keys.onEscapePressed: root.requestCancel()
+            Keys.onPressed: function(event) { root.editorShortcut(event) }
           }
 
           TextArea {
             id: noteEditor
             width: parent.width
             height: Style.space(220)
-            placeholderText: "Write your note…"
+            placeholderText: root.loadingNote ? "Loading…" : "Write your note…"
             color: root.foreground
             placeholderTextColor: root.dim
             selectionColor: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25)
@@ -432,6 +709,7 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
             wrapMode: TextEdit.Wrap
+            readOnly: root.saving || root.loadingNote
             padding: Style.space(10)
             background: Rectangle {
               color: "transparent"
@@ -439,7 +717,9 @@ Panel {
               border.color: root.dim
               border.width: 1
             }
-            Keys.onEscapePressed: root.cancelComposing()
+            onTextChanged: root.discardArmed = false
+            Keys.onEscapePressed: root.requestCancel()
+            Keys.onPressed: function(event) { root.editorShortcut(event) }
           }
 
           Text {
@@ -450,6 +730,7 @@ Panel {
             color: root.bar ? root.bar.urgent : Color.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           Row {
@@ -462,7 +743,7 @@ Panel {
               fontSize: Style.font.bodySmall
               bordered: true
               focusable: true
-              enabled: !root.saving
+              enabled: !root.saving && !root.loadingNote
               onClicked: root.saveNote()
             }
 
@@ -474,6 +755,29 @@ Panel {
               focusable: true
               enabled: !root.saving
               onClicked: root.cancelComposing()
+            }
+
+            Button {
+              visible: root.editingPath !== ""
+              text: "Open"
+              tooltipText: "Open in Obsidian"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              focusable: true
+              onClicked: root.openPath(root.editingPath)
+            }
+
+            Button {
+              visible: root.editingPath !== ""
+              text: root.deleteArmedPath === root.editingPath ? "Confirm delete" : "Delete"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              bordered: true
+              focusable: true
+              enabled: !root.deleting && !root.loadingNote
+              onClicked: root.requestDelete()
             }
           }
         }
@@ -672,6 +976,7 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           horizontalAlignment: Text.AlignRight
+          wrapMode: Text.WordWrap
         }
       }
     }

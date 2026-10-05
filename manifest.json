@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "rperaza.obsidian-notes",
+  "id": "design-nexus.obsidian-notes",
   "name": "Obsidian Notes",
-  "version": "1.0.1",
-  "author": "Roimer Peraza",
-  "description": "Search and open notes across an Obsidian vault from the bar.",
+  "version": "1.1.0",
+  "author": "Ken Smith (fork of Roimer Peraza)",
+  "description": "Search, capture, edit, and delete notes in an Obsidian vault from the bar.",
   "license": "MIT",
   "kinds": ["bar-widget"],
   "entryPoints": {
@@ -12,7 +12,7 @@
   },
   "barWidget": {
     "displayName": "Obsidian Notes",
-    "description": "Search notes across the Obsidian vault and open them in Obsidian",
+    "description": "Search, capture, edit, and delete notes in an Obsidian vault",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "center",

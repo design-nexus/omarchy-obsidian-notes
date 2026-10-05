@@ -1,6 +1,8 @@
 # Obsidian Notes for Omarchy
 
-Search, open, and capture Obsidian notes without leaving the Omarchy bar.
+Fork of [joisephdev/omarchy-obsidian](https://github.com/joisephdev/omarchy-obsidian) by Roimer Peraza.
+
+Search, open, edit, and capture Obsidian notes without leaving the Omarchy bar.
 
 ![Obsidian Notes panel showing fictional demo notes](preview.png)
 
@@ -9,7 +11,10 @@ Search, open, and capture Obsidian notes without leaving the Omarchy bar.
 - Search every Markdown note by title, path, or full text.
 - See ranked results instantly, with matching-line previews when searching.
 - Open a selected note through Obsidian's native `obsidian://` URI.
-- Capture a quick Markdown note directly from the panel.
+- Create a note with a title. New notes are saved under `Notes/`.
+- Edit an existing note in the panel without renaming its file.
+- Move a note to the vault `.trash/` after a second confirmation.
+- Copy an Obsidian wikilink for the selected note.
 - Choose or change the vault with the built-in folder picker.
 - Navigate entirely by keyboard or use the mouse.
 - Match the active Omarchy theme, typography, and panel styling.
@@ -18,14 +23,14 @@ Search, open, and capture Obsidian notes without leaving the Omarchy bar.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/joisephdev/omarchy-obsidian --enable
+omarchy plugin add https://github.com/design-nexus/omarchy-obsidian --enable
 ```
 
 The `Notes` widget is placed in the center section by default. Move it anywhere
 in the bar with:
 
 ```sh
-omarchy bar move rperaza.obsidian-notes --section right
+omarchy bar move design-nexus.obsidian-notes --section right
 ```
 
 ## Choose a vault
@@ -42,7 +47,7 @@ need to be open in Obsidian while searching.
 You can also configure the path from a terminal:
 
 ```sh
-omarchy bar set rperaza.obsidian-notes vaultPath ~/Documents/my-vault
+omarchy bar set design-nexus.obsidian-notes vaultPath ~/Documents/my-vault
 ```
 
 Both absolute paths and paths beginning with `~/` are supported.
@@ -55,6 +60,10 @@ query as plain text rather than a regular expression.
 
 - **Up / Down** — move through results
 - **Enter** — open the selected note in Obsidian
+- **Ctrl+N** — new note
+- **Ctrl+E** — edit the selected note
+- **Ctrl+L** — copy a wikilink (`[[folder/note]]`)
+- **Delete** — arm delete; press again to move the note into `.trash/`
 - **Escape** — clear the query; press again to close the panel
 - **Tab** — move to the next bar panel
 - **Left click** — open or close the Notes panel
@@ -66,32 +75,43 @@ Note titles are resolved in this order:
 2. The first Markdown heading
 3. The Markdown filename
 
-## Capture a quick note
+## Create a note
 
-Select **+** to replace the result list with a focused Markdown editor. Write
-the note and select **Save**. The plugin creates the following directory when
-needed:
+Select **+** or press **Ctrl+N**. The composer has a title and a body.
 
-```text
-<vault>/omarchy-notes/
-```
-
-Notes use collision-safe timestamped filenames such as:
+A title is saved as a slug under `Notes/`, and the file starts with that
+heading:
 
 ```text
-omarchy-notes/2026-08-20-143015.md
+Notes/my-note.md
 ```
 
-Existing files are never overwritten. Select **Cancel** or press **Escape** to
-return to search without writing a file.
+An empty title keeps a timestamp filename, also under `Notes/`. Names that
+already exist get a `-2`, `-3` suffix. Existing files are never overwritten.
+**Ctrl+Enter** saves. **Escape** returns to search. A second **Escape**
+discards unsaved edits.
+
+## Edit a note
+
+Press **Ctrl+E** or select **Edit**. The same composer opens on that file.
+Saving updates a `title:` or `titulo:` frontmatter line when one exists.
+Otherwise it updates or inserts the first `#` heading. The filename stays
+put, so links to that note keep working. **Open** still launches Obsidian.
+
+## Delete a note
+
+Press **Delete**, or select **Del**, once to arm the action and again to
+confirm. The file moves to `<vault>/.trash/` with its folder path kept.
+Search ignores that directory. The file is not removed from disk.
 
 ## Privacy and filesystem access
 
 Everything happens locally:
 
-- `search.sh` reads Markdown files inside the selected vault.
-- `create-note.sh` writes only to `<vault>/omarchy-notes/` when you explicitly
-  save a quick note.
+- `search.sh` and `read-note.sh` read Markdown files inside the selected vault.
+- `create-note.sh` writes only to `<vault>/Notes/` when you save a new note.
+- `write-note.sh` rewrites an existing note when you save an edit.
+- `delete-note.sh` moves a note into `<vault>/.trash/` only after you confirm.
 - `.obsidian/`, `.trash/`, and `.git/` directories are excluded from search.
 - No note contents, filenames, or queries are sent over the network.
 - No index, cache, telemetry, or background daemon is created.
@@ -110,17 +130,17 @@ Review the source before installing third-party plugins.
 ## Update
 
 ```sh
-omarchy plugin update rperaza.obsidian-notes
+omarchy plugin update design-nexus.obsidian-notes
 ```
 
 ## Remove
 
 ```sh
-omarchy plugin remove rperaza.obsidian-notes
+omarchy plugin remove design-nexus.obsidian-notes
 ```
 
-Removing the plugin does not delete or modify your vault. Notes previously
-created under `omarchy-notes/` remain ordinary Markdown files.
+Removing the plugin does not delete or modify your vault. Notes under
+`Notes/` and `.trash/` remain ordinary Markdown files.
 
 ## Troubleshooting
 
@@ -153,7 +173,7 @@ Validate the plugin directory before publishing:
 
 ```sh
 omarchy plugin validate .
-bash -n search.sh create-note.sh
+bash -n search.sh create-note.sh read-note.sh write-note.sh delete-note.sh note-lib.sh
 ```
 
 The plugin has no build step and no downloaded runtime dependencies.
