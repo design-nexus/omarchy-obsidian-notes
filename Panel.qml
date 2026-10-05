@@ -89,6 +89,11 @@ Panel {
     bordered: true
     focusable: true
     opacity: enabled ? 1 : 0.4
+    // One device pixel. The theme border is a full logical pixel and looks heavy here.
+    readonly property real hairline: 1 / Math.max(1, Screen.devicePixelRatio)
+    borderSpec: Border.withWidth(
+      Border.controlSpec(activeFocus ? "focus" : hot ? "hover-cursor" : "normal", foreground, accent),
+      hairline)
   }
 
   function vaultName() {
