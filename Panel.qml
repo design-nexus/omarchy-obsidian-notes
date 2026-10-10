@@ -4,6 +4,7 @@ import Qt.labs.folderlistmodel
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Bar search over an Obsidian vault.
@@ -22,10 +23,10 @@ Panel {
   // transparent. bar.barForeground is intentionally animated to contrast the
   // wallpaper behind a transparent bar (via omarchy-bar-text-color), so it
   // can become near-black on light wallpapers while the popup card stays
-  // Color.popups.background (dark). Using barForeground inside the popup
+  // Commons.Color.popups.background (dark). Using barForeground inside the popup
   // therefore makes dark-on-dark unreadable. Use the popup surface palette.
-  readonly property color foreground: Color.popups.text
-  readonly property color dim: Util.alpha(Color.popups.text, 0.62)
+  readonly property color foreground: Commons.Color.popups.text
+  readonly property color dim: Util.alpha(Commons.Color.popups.text, 0.62)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string configuredVaultPath: String(root.setting("vaultPath", "")).trim()
   readonly property string vaultPath: configuredVaultPath.indexOf("~/") === 0
@@ -711,7 +712,7 @@ Panel {
             width: parent.width
             text: root.saveError
             textFormat: Text.PlainText
-            color: root.bar ? root.bar.urgent : Color.urgent
+            color: root.bar ? root.bar.urgent : Commons.Color.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
