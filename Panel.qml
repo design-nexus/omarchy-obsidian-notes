@@ -267,6 +267,7 @@ Panel {
     root.loadedBody = ""
     titleField.text = ""
     noteEditor.text = ""
+    if (noteEditorFlick) noteEditorFlick.contentY = noteEditorFlick.originY
     Qt.callLater(function() { titleField.forceActiveFocus() })
   }
 
@@ -285,6 +286,7 @@ Panel {
     root.loadedBody = ""
     titleField.text = ""
     noteEditor.text = ""
+    if (noteEditorFlick) noteEditorFlick.contentY = noteEditorFlick.originY
     readProcess.command = [root.readCommand, root.vaultPath, path]
     readProcess.running = true
   }
@@ -302,6 +304,7 @@ Panel {
       var parsed = JSON.parse(text)
       titleField.text = String(parsed.title || "")
       noteEditor.text = String(parsed.body || "")
+      if (noteEditorFlick) noteEditorFlick.contentY = noteEditorFlick.originY
       root.loadedTitle = titleField.text
       root.loadedBody = noteEditor.text
       root.discardArmed = false
@@ -323,6 +326,7 @@ Panel {
     root.deleteArmedPath = ""
     titleField.text = ""
     noteEditor.text = ""
+    if (noteEditorFlick) noteEditorFlick.contentY = noteEditorFlick.originY
     Qt.callLater(function() { filterField.forceActiveFocus() })
   }
 
@@ -420,6 +424,7 @@ Panel {
     root.notice = ""
     root.deleteArmedPath = ""
     root.discardArmed = false
+    if (resultList) resultList.contentY = resultList.originY
     root.choosingVault = root.vaultPath === ""
     if (!root.choosingVault) root.runSearch()
     Qt.callLater(function() {
@@ -633,7 +638,19 @@ Panel {
                 event.accepted = true
               }
             }
-            Keys.onPressed: function(event) { root.handleListShortcut(event) }
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_PageUp) {
+                root.move(-root.maxRows)
+                event.accepted = true
+                return
+              }
+              if (event.key === Qt.Key_PageDown) {
+                root.move(root.maxRows)
+                event.accepted = true
+                return
+              }
+              root.handleListShortcut(event)
+            }
           }
 
           ActionButton {
@@ -682,29 +699,65 @@ Panel {
             Keys.onPressed: function(event) { root.editorShortcut(event) }
           }
 
-          TextArea {
-            id: noteEditor
+          Rectangle {
+            id: editorContainer
             width: parent.width
-            height: Style.space(220)
-            placeholderText: root.loadingNote ? "Loading…" : "Write your note…"
-            color: root.foreground
-            placeholderTextColor: root.dim
-            selectionColor: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25)
-            selectedTextColor: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            wrapMode: TextEdit.Wrap
-            readOnly: root.saving || root.loadingNote
-            padding: Style.space(10)
-            background: Rectangle {
-              color: "transparent"
-              radius: Style.cornerRadius
-              border.color: root.dim
-              border.width: 1
+            height: Style.space(240)
+            implicitHeight: height
+            color: "transparent"
+            radius: Style.cornerRadius
+            border.color: root.dim
+            border.width: 1
+            clip: true
+
+            Flickable {
+              id: noteEditorFlick
+              anchors.fill: parent
+              anchors.margins: 1
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+              flickableDirection: Flickable.VerticalFlick
+              interactive: true
+
+              ScrollBar.vertical: ScrollBar {
+                id: editorScrollBar
+                policy: ScrollBar.AsNeeded
+              }
+
+              WheelHandler {
+                target: null
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: function(event) {
+                  var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : (event.angleDelta.y / 120 * Style.space(40))
+                  if (delta === 0) return
+                  var bottom = noteEditorFlick.originY + Math.max(0, noteEditorFlick.contentHeight - noteEditorFlick.height)
+                  noteEditorFlick.contentY = Math.max(noteEditorFlick.originY, Math.min(bottom, noteEditorFlick.contentY - delta))
+                  event.accepted = true
+                }
+              }
+
+              TextArea.flickable: TextArea {
+                id: noteEditor
+                width: noteEditorFlick.width
+                placeholderText: root.loadingNote ? "Loading…" : "Write your note…"
+                color: root.foreground
+                placeholderTextColor: root.dim
+                selectionColor: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25)
+                selectedTextColor: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: TextEdit.Wrap
+                readOnly: root.saving || root.loadingNote
+                topPadding: Style.space(10)
+                bottomPadding: Style.space(10)
+                leftPadding: Style.space(10)
+                rightPadding: editorScrollBar.visible ? (editorScrollBar.width + Style.space(6)) : Style.space(10)
+                background: null
+                onTextChanged: root.discardArmed = false
+                Keys.onEscapePressed: root.requestCancel()
+                Keys.onPressed: function(event) { root.editorShortcut(event) }
+              }
             }
-            onTextChanged: root.discardArmed = false
-            Keys.onEscapePressed: root.requestCancel()
-            Keys.onPressed: function(event) { root.editorShortcut(event) }
           }
 
           Text {
@@ -801,16 +854,32 @@ Panel {
             id: folderList
             width: parent.width
             height: root.rowHeight * 6
+            implicitHeight: height
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             model: folderModel
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            ScrollBar.vertical: ScrollBar {
+              id: folderScrollBar
+              policy: ScrollBar.AsNeeded
+            }
+
+            WheelHandler {
+              target: null
+              acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+              onWheel: function(event) {
+                var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : (event.angleDelta.y / 120 * root.rowHeight)
+                if (delta === 0) return
+                var bottom = folderList.originY + Math.max(0, folderList.contentHeight - folderList.height)
+                folderList.contentY = Math.max(folderList.originY, Math.min(bottom, folderList.contentY - delta))
+                event.accepted = true
+              }
+            }
 
             delegate: Button {
               required property int index
               required property string fileName
               required property url fileUrl
-              width: folderList.width
+              width: folderList.width - (folderScrollBar.visible ? (folderScrollBar.width + Style.space(4)) : 0)
               text: root.escapeHtml(fileName)
               leftAlign: true
               foreground: root.foreground
@@ -832,12 +901,28 @@ Panel {
           id: resultList
           visible: !root.choosingVault && !root.composing
           width: parent.width
-          height: Math.min(root.results.length, root.maxRows) * root.rowHeight
+          height: Math.min(contentHeight, root.maxRows * root.rowHeight)
+          implicitHeight: height
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           flickableDirection: Flickable.VerticalFlick
-          interactive: root.results.length > root.maxRows
-          ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+          interactive: contentHeight > height
+          ScrollBar.vertical: ScrollBar {
+            id: resultScrollBar
+            policy: ScrollBar.AsNeeded
+          }
+
+          WheelHandler {
+            target: null
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: function(event) {
+              var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : (event.angleDelta.y / 120 * root.rowHeight)
+              if (delta === 0) return
+              var bottom = resultList.originY + Math.max(0, resultList.contentHeight - resultList.height)
+              resultList.contentY = Math.max(resultList.originY, Math.min(bottom, resultList.contentY - delta))
+              event.accepted = true
+            }
+          }
 
           model: root.results
           currentIndex: root.selectedIndex
@@ -863,7 +948,7 @@ Panel {
                 hideActions.restart()
               }
             }
-            width: resultList.width
+            width: resultList.width - (resultScrollBar.visible ? (resultScrollBar.width + Style.space(4)) : 0)
             height: root.rowHeight
             radius: Style.space(4)
             color: root.selectedIndex === index
